@@ -1,49 +1,80 @@
-var Filter = require('broccoli-filter');
-var path = require('path');
-var Cache = require('broccoli-filter/lib/cache');
+var Filter = require('broccoli-filter')
+var path = require('path')
+var Cache = require('broccoli-filter/lib/cache')
+var debug = require('debug')('broccoli-asset-rewrite')
 
 function normalize(str) {
-  return str.replace(/[\\\/]+/g, '/');
+  return str.replace(/[\\\/]+/g, '/')
+}
+
+function buildTest(tests = []) {
+  return value => {
+    return tests.reduce((pass, path) => {
+      if (pass) {
+        return pass
+      }
+      let result = pass
+      if (path instanceof RegExp) {
+        result = path.test(value)
+      } else {
+        result = path === value
+      }
+      return result
+    }, false)
+  }
 }
 
 function relative(a, b) {
   if (/\./.test(path.basename(a))) {
-    a = path.dirname(a);
+    a = path.dirname(a)
   }
 
-  var relativePath = path.relative(a, b);
+  var relativePath = path.relative(a, b)
   // path.relative might have added back \-s on windows
-  relativePath = normalize(relativePath);
-  return relativePath.charAt(0) !== '.' ? './' + relativePath : relativePath;
+  relativePath = normalize(relativePath)
+  return relativePath.charAt(0) !== '.' ? './' + relativePath : relativePath
 }
 
 function AssetRewrite(inputNode, options) {
   if (!(this instanceof AssetRewrite)) {
-    return new AssetRewrite(inputNode, options);
+    return new AssetRewrite(inputNode, options)
   }
 
-  options = options || {};
+  options = options || {}
 
   Filter.call(this, inputNode, {
     extensions: options.replaceExtensions || ['html', 'css'],
     // We should drop support for `description` in the next major release
     annotation: options.description || options.annotation
-  });
+  })
 
-  this.assetMap = options.assetMap || {};
-  this.prepend = options.prepend || '';
-  this.ignore = options.ignore || []; // files to ignore
+  this.assetMap = options.assetMap || {}
+  this.prepend = options.prepend || ''
+  this.ignore = Object.assign(
+    {
+      assets: [],
+      paths: []
+    },
+    options.ignore || {}
+  ) // files to ignore
 
-  this.assetMapKeys = null;
+  this.ignoresAsset = buildTest(this.ignore.assets)
+  this.ignoresPath = buildTest(this.ignore.paths)
+
+  this.assetMapKeys = null
 }
 
-AssetRewrite.prototype = Object.create(Filter.prototype);
-AssetRewrite.prototype.constructor = AssetRewrite;
+AssetRewrite.prototype = Object.create(Filter.prototype)
+AssetRewrite.prototype.constructor = AssetRewrite
 
-AssetRewrite.prototype.processAndCacheFile = function (srcDir, destDir, relativePath) {
-  this._cache = new Cache();
+AssetRewrite.prototype.processAndCacheFile = function (
+  srcDir,
+  destDir,
+  relativePath
+) {
+  this._cache = new Cache()
 
-  return Filter.prototype.processAndCacheFile.apply(this, arguments);
+  return Filter.prototype.processAndCacheFile.apply(this, arguments)
 }
 
 /**
@@ -52,21 +83,21 @@ AssetRewrite.prototype.processAndCacheFile = function (srcDir, destDir, relative
  * @returns {boolean}
  */
 
-AssetRewrite.prototype.canProcessFile = function(relativePath) {
+AssetRewrite.prototype.canProcessFile = function (relativePath) {
   if (!this.assetMapKeys) {
-    this.generateAssetMapKeys();
+    this.generateAssetMapKeys()
   }
 
   if (!this.inverseAssetMap) {
-    var inverseAssetMap = {};
-    var assetMap = this.assetMap;
+    var inverseAssetMap = {}
+    var assetMap = this.assetMap
 
-    Object.keys(assetMap).forEach(function(key) {
-      var value = assetMap[key];
-      inverseAssetMap[value] = key;
-    }, this);
+    Object.keys(assetMap).forEach(function (key) {
+      var value = assetMap[key]
+      inverseAssetMap[value] = key
+    }, this)
 
-    this.inverseAssetMap = inverseAssetMap;
+    this.inverseAssetMap = inverseAssetMap
   }
 
   /*
@@ -74,19 +105,28 @@ AssetRewrite.prototype.canProcessFile = function(relativePath) {
    * Check that neither of these variations are being ignored
    */
 
-  if (this.ignore.indexOf(relativePath) !== -1 || this.ignore.indexOf(this.inverseAssetMap[relativePath]) !== -1) {
-    return false;
+  if (
+    this.ignoresAsset(relativePath) ||
+    this.ignoresAsset(this.inverseAssetMap[relativePath])
+  ) {
+    debug(
+      `ignoring asset: ${relativePath || this.inverseAssetMap[relativePath]}`
+    )
+    return false
   }
 
-  return Filter.prototype.canProcessFile.apply(this, arguments);
+  return Filter.prototype.canProcessFile.apply(this, arguments)
 }
 
-AssetRewrite.prototype.rewriteAssetPath = function (string, assetPath, replacementPath) {
-
+AssetRewrite.prototype.rewriteAssetPath = function (
+  string,
+  assetPath,
+  replacementPath
+) {
   // Early exit: does the file contain the asset path?
-  if (string.indexOf(assetPath) === -1) return string;
+  if (string.indexOf(assetPath) === -1) return string
 
-  var newString = string;
+  var newString = string
 
   /*
    * Replace all of the assets with their new fingerprint name
@@ -106,95 +146,117 @@ AssetRewrite.prototype.rewriteAssetPath = function (string, assetPath, replaceme
    * ["\')>\s] - Match one of "'(\n> exactly one time
    */
 
-  var re = new RegExp('["\'(=]\\s*([^"\'()=]*' + escapeRegExp(assetPath) + '[^"\n\'()\\>=]*)(\\?[^"\')> ]*)?\\s*\\\\*\\s*["\')>\s]', 'g');
-  var match = null;
-  
+  var re = new RegExp(
+    '["\'(=]\\s*([^"\'()=]*' +
+      escapeRegExp(assetPath) +
+      '[^"\n\'()\\>=]*)(\\?[^"\')> ]*)?\\s*\\\\*\\s*["\')>s]',
+    'g'
+  )
+  var match = null
+
   /*
    * This is to ignore matches that should not be changed
    * Any URL encoded match that would be ignored above will be ignored by this: "'()=\
    */
-  var ignoreLibraryCode = new RegExp('%(22|27|5C|28|29|3D)[^"\'()=]*' + escapeRegExp(assetPath));
+  var ignoreLibraryCode = new RegExp(
+    '%(22|27|5C|28|29|3D)[^"\'()=]*' + escapeRegExp(assetPath)
+  )
 
-  while (match = re.exec(newString)) {
-    var replaceString = '';
-    if (ignoreLibraryCode.exec(match[1])) {
-      continue;
+  while ((match = re.exec(newString))) {
+    var replaceString = ''
+    debug(`testing path in file ${assetPath}: ${match[1]}`)
+    if (ignoreLibraryCode.exec(match[1]) || this.ignoresPath(match[1])) {
+      debug(`ignoring path in file ${assetPath}: "${match[1]}"`)
+      continue
     }
 
-    replaceString = match[1].replace(assetPath, replacementPath);
+    replaceString = match[1].replace(assetPath, replacementPath)
 
     if (this.prepend && replaceString.indexOf(this.prepend) !== 0) {
-      var removeLeadingRelativeOrSlashRegex = new RegExp('^(\\.*/)*(.*)$');
-      replaceString = this.prepend + removeLeadingRelativeOrSlashRegex.exec(replaceString)[2];
+      var removeLeadingRelativeOrSlashRegex = new RegExp('^(\\.*/)*(.*)$')
+      replaceString =
+        this.prepend + removeLeadingRelativeOrSlashRegex.exec(replaceString)[2]
     }
 
-    newString = newString.replace(new RegExp(escapeRegExp(match[1]), 'g'), replaceString);
+    newString = newString.replace(
+      new RegExp(escapeRegExp(match[1]), 'g'),
+      replaceString
+    )
   }
 
-  var self = this;
-  return newString.replace(new RegExp('sourceMappingURL=' + escapeRegExp(assetPath)), function(wholeMatch) {
-    var replaceString = replacementPath;
-    if (self.prepend && (!/^sourceMappingURL=(http|https|\/\/)/.test(wholeMatch))) {
-      replaceString = self.prepend + replacementPath;
+  var self = this
+  return newString.replace(
+    new RegExp('sourceMappingURL=' + escapeRegExp(assetPath)),
+    function (wholeMatch) {
+      var replaceString = replacementPath
+      if (
+        self.prepend &&
+        !/^sourceMappingURL=(http|https|\/\/)/.test(wholeMatch)
+      ) {
+        replaceString = self.prepend + replacementPath
+      }
+      return wholeMatch.replace(assetPath, replaceString)
     }
-    return wholeMatch.replace(assetPath, replaceString);
-  });
-};
+  )
+}
 
 AssetRewrite.prototype.processString = function (string, relativePath) {
-  var newString = string;
+  var newString = string
 
   for (var i = 0, keyLength = this.assetMapKeys.length; i < keyLength; i++) {
-    var key = this.assetMapKeys[i];
+    var key = this.assetMapKeys[i]
 
     if (this.assetMap.hasOwnProperty(key)) {
       /*
        * Rewrite absolute URLs
        */
 
-      newString = this.rewriteAssetPath(newString, key, this.assetMap[key]);
+      newString = this.rewriteAssetPath(newString, key, this.assetMap[key])
 
       /*
        * Rewrite relative URLs. If there is a prepend, use the full absolute path.
        */
 
-      var pathDiff = relative(relativePath, key).replace(/^\.\//, "");
-      var replacementDiff = relative(relativePath, this.assetMap[key]).replace(/^\.\//, "");
+      var pathDiff = relative(relativePath, key).replace(/^\.\//, '')
+      var replacementDiff = relative(relativePath, this.assetMap[key]).replace(
+        /^\.\//,
+        ''
+      )
 
       if (this.prepend && this.prepend !== '') {
-        replacementDiff = this.assetMap[key];
+        replacementDiff = this.assetMap[key]
       }
 
-      newString = this.rewriteAssetPath(newString, pathDiff, replacementDiff);
+      newString = this.rewriteAssetPath(newString, pathDiff, replacementDiff)
     }
   }
 
-  return newString;
-};
+  return newString
+}
 
 AssetRewrite.prototype.generateAssetMapKeys = function () {
-  var keys = Object.keys(this.assetMap);
+  var keys = Object.keys(this.assetMap)
 
   keys.sort(function (a, b) {
     if (a.length < b.length) {
-      return 1;
+      return 1
     }
 
     if (a.length > b.length) {
-      return -1;
+      return -1
     }
 
-    return 0;
-  });
+    return 0
+  })
 
-  this.assetMapKeys = keys;
-};
+  this.assetMapKeys = keys
+}
 
 /*
  * /([.*+?^=!:${}()|\[\]\/\\])/g - Replace .*+?^=!:${}()|[]/\ in filenames with an escaped version for an exact name match
  */
 function escapeRegExp(string) {
-  return string.replace(/([.*+?^${}()|\[\]\/\\])/g, "\\$1");
+  return string.replace(/([.*+?^${}()|\[\]\/\\])/g, '\\$1')
 }
 
-module.exports = AssetRewrite;
+module.exports = AssetRewrite

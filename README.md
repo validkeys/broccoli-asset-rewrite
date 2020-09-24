@@ -52,7 +52,7 @@ var assetNode = new AssetRewrite(node, {
   - `assetMap` - Default: `{}` - The asset map to rewrite source from.
   - `replaceExtensions` - Default: `['html', 'css']` - The file types to replace source code with new checksum file names.
   - `prepend` - Default: `''` - A string to prepend to all of the assets. Useful for CDN urls like `https://subdomain.cloudfront.net/`
-  - `ignore` - Default: `[]` - Ignore files from being rewritten.
+  - `ignore` - Default: `{ assets: [], paths: [] }` - ignore.assets represents an array of strings/regex patterns of file names to ignore fingerprinting. ignore.paths represents an array of strings/regex patterns of file paths within compiled code to ignore.
   - `annotation` - Default: null - A human-readable description for this plugin instance.
 
 [![ghit.me](https://ghit.me/badge.svg?repo=rickharrison/broccoli-asset-rewrite)](https://ghit.me/repo/rickharrison/broccoli-asset-rewrite)
